@@ -1,48 +1,62 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
+from datetime import datetime, time
 
 # --- APP CONFIG ---
-st.set_page_config(page_title="0DTE Weighted EM Cockpit", layout="wide")
-st.title("🎯 0DTE Expected Move Dashboard")
+st.set_page_config(page_title="0DTE EM Pro", layout="wide")
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("10:00 AM Anchor")
-s0 = st.sidebar.number_input("Anchor Price (S0)", value=6500.0)
+# --- AUTO-TIME LOGIC ---
+now = datetime.now().time()
+market_open = time(9, 30)
+market_close = time(16, 0)
+
+# Calculate decimal time (t) automatically
+if now < market_open:
+    auto_t = 0.0
+elif now > market_close:
+    auto_t = 1.0
+else:
+    # Calculate fraction of 390 minutes elapsed
+    elapsed = (datetime.combine(datetime.today(), now) - datetime.combine(datetime.today(), market_open)).seconds / 60
+    auto_t = min(elapsed / 390, 1.0)
+
+# --- SIDEBAR ---
+st.sidebar.header("🎯 10:00 AM Anchor")
+s0 = st.sidebar.number_input("Anchor Price (S0)", value=6500.0, step=1.0)
+w_anchor_manual = st.sidebar.number_input("Manual W_Anchor (Optional)", value=0.0)
+
+st.sidebar.header("📊 Live Options Chain")
 a = st.sidebar.number_input("ATM Straddle (a)", value=22.5)
 b = st.sidebar.number_input("OTM1 Strangle (b)", value=28.0)
 c = st.sidebar.number_input("OTM2 Strangle (c)", value=35.0)
 
-st.sidebar.header("Live Market Data")
-s_live = st.sidebar.number_input("Current Price (Slive)", value=6520.0)
-t = st.sidebar.slider("Time Elapsed (t)", 0.0, 1.0, 0.6)
+st.sidebar.header("🕒 Market Clock")
+s_live = st.sidebar.number_input("Current SPX Price", value=6520.0, step=0.5)
+use_auto_time = st.sidebar.checkbox("Use Real-Time Clock", value=True)
+t = auto_t if use_auto_time else st.sidebar.slider("Manual Time Slider", 0.0, 1.0, 0.5)
 
-# --- MATH LOGIC ---
-w_anchor = (0.6 * a) + (0.3 * b) + (0.1 * c)
-d_remaining = w_anchor * np.sqrt(1 - t)
+# --- MATH ---
+w_calc = (0.6 * a) + (0.3 * b) + (0.1 * c)
+w_final = w_calc if w_anchor_manual == 0 else w_anchor_manual
+d_remaining = w_final * np.sqrt(1 - t)
 
-upper_anchor, lower_anchor = s0 + w_anchor, s0 - w_anchor
-upper_live, lower_live = s_live + d_remaining, s_live - d_remaining
+# --- DYNAMIC Y-AXIS (Fixes the limitation) ---
+y_min = min(s0 - w_final, s_live - d_remaining) - 20
+y_max = max(s0 + w_final, s_live + d_remaining) + 20
 
-# --- STATUS INDICATORS ---
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Weighted EM (Anchor)", f"{w_anchor:.2f}")
-with col2:
-    st.metric("Remaining Vol (D)", f"{d_remaining:.2f}")
-with col3:
-    status = "⚠️ OVER-EXTENDED" if s_live > upper_anchor or s_live < lower_anchor else "✅ WITHIN RANGE"
-    st.subheader(status)
+# --- UI HEADER ---
+is_over = s_live > (s0 + w_final) or s_live < (s0 - w_final)
+status_color = "red" if is_over else "green"
+st.markdown(f"<h2 style='text-align: center; color: {status_color};'>{'🚨 OUTSIDE EXPECTED RANGE' if is_over else '✅ WITHIN EXPECTED RANGE'}</h2>", unsafe_allow_html=True)
 
-# --- THE VISUAL CHART ---
+# --- PLOT ---
 fig = go.Figure()
+fig.add_shape(type="rect", y0=s0-w_final, y1=s0+w_final, x0=0, x1=1, fillcolor="gray", opacity=0.2, line_width=0)
+fig.add_shape(type="rect", y0=s_live-d_remaining, y1=s_live+d_remaining, x0=0.2, x1=0.8, fillcolor="purple", opacity=0.4)
+fig.add_hline(y=s_live, line_dash="dash", line_color="white", annotation_text=f"LIVE: {s_live}")
+fig.add_hline(y=s0, line_color="yellow", opacity=0.5, annotation_text="OPEN ANCHOR")
 
-# Gray Box (Anchor Range)
-fig.add_shape(type="rect", y0=lower_anchor, y1=upper_anchor, x0=0, x1=1, fillcolor="LightGray", opacity=0.3, layer="below")
-# Purple Box (Live Risk)
-fig.add_shape(type="rect", y0=lower_live, y1=upper_live, x0=0.3, x1=0.7, fillcolor="Purple", opacity=0.5)
-# Live Price Line
-fig.add_hline(y=s_live, line_dash="dash", line_color="black", annotation_text=f"Live: {s_live}")
-
-fig.update_layout(yaxis_range=[s0-60, s0+60], title="Volatility Cloud vs. Daily Anchor", xaxis_showticklabels=False)
+fig.update_layout(yaxis_range=[y_min, y_max], template="plotly_dark", height=600)
 st.plotly_chart(fig, use_container_width=True)
+
