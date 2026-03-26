@@ -60,3 +60,20 @@ fig.add_hline(y=s0, line_color="yellow", opacity=0.5, annotation_text="OPEN ANCH
 fig.update_layout(yaxis_range=[y_min, y_max], template="plotly_dark", height=600)
 st.plotly_chart(fig, use_container_width=True)
 
+# --- STATS TABLE ---
+st.divider()
+st.subheader("📊 Statistical Context")
+z_score = abs(s_live - s0) / w_final if w_final > 0 else 0
+
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    st.metric("Move from Anchor", f"{s_live - s0:+.2f} pts")
+with col_b:
+    st.metric("Standard Deviations", f"{z_score:.2f} σ")
+with col_c:
+    prob = "68%" if z_score <= 1 else "95%" if z_score <= 2 else "99.7%"
+    st.metric("Confidence Level", prob)
+
+st.info(f"A {z_score:.2f} sigma move happens approximately {100*np.exp(-0.5*z_score**2):.1f}% of the time.")
+
+
